@@ -41,7 +41,7 @@
 #import <ReactiveCocoa/UITextField+RACSubscribableSupport.h>
 #import <ReactiveCocoa/UITextView+RACSubscribableSupport.h>
 #elif TARGET_OS_MAC
-#import <ReactiveCocoa/EXTKeyPathCoding.h>
+#import <ReactiveCocoa/libextobjc/extobjc/EXTKeyPathCoding.h>
 #import <ReactiveCocoa/NSButton+RACCommandSupport.h>
 #import <ReactiveCocoa/NSObject+RACAppKitBindings.h>
 #endif
