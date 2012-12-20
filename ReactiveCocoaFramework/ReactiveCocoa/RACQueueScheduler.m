@@ -21,6 +21,7 @@
 
 - (void)dealloc {
 	dispatch_release(_queue);
+	[super dealloc];
 }
 
 - (id)initWithName:(NSString *)name targetQueue:(dispatch_queue_t)targetQueue {
