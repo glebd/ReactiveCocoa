@@ -7,111 +7,132 @@
 //
 
 #import "RACScheduler.h"
+#import "RACCompoundDisposable.h"
+#import "RACDisposable.h"
+#import "RACImmediateScheduler.h"
+#import "RACQueueScheduler.h"
+#import "RACScheduler+Private.h"
+#import "RACSubscriptionScheduler.h"
+#import <libkern/OSAtomic.h>
+
+// The key for the queue-specific current scheduler.
+const void *RACSchedulerCurrentSchedulerKey = &RACSchedulerCurrentSchedulerKey;
 
 @interface RACScheduler ()
-@property (nonatomic, copy) void (^scheduleBlock)(void (^block)(void));
+@property (nonatomic, readonly, copy) NSString *name;
 @end
-
 
 @implementation RACScheduler
 
+#pragma mark NSObject
 
-#pragma mark API
-
-@synthesize scheduleBlock;
-
-+ (instancetype)schedulerWithScheduleBlock:(void (^)(void (^block)(void)))scheduleBlock {
-	NSParameterAssert(scheduleBlock != NULL);
-	
-	RACScheduler *scheduler = [[self alloc] init];
-	scheduler.scheduleBlock = scheduleBlock;
-	return scheduler;
+- (NSString *)description {
+	return [NSString stringWithFormat:@"<%@: %p> %@", self.class, self, self.name];
 }
+
+#pragma mark Initializers
+
+- (id)initWithName:(NSString *)name {
+	self = [super init];
+	if (self == nil) return nil;
+
+	_name = [name ?: @"com.ReactiveCocoa.RACScheduler.anonymousScheduler" copy];
+
+	return self;
+}
+
+#pragma mark Schedulers
 
 + (instancetype)immediateScheduler {
 	static dispatch_once_t onceToken;
-	static RACScheduler *immediateScheduler = nil;
+	static RACScheduler *immediateScheduler;
 	dispatch_once(&onceToken, ^{
-		immediateScheduler = [RACScheduler schedulerWithScheduleBlock:^(void (^block)(void)) {
-			block();
-		}];
+		immediateScheduler = [[RACImmediateScheduler alloc] init];
 	});
 	
 	return immediateScheduler;
 }
 
-+ (instancetype)mainQueueScheduler {
++ (instancetype)mainThreadScheduler {
 	static dispatch_once_t onceToken;
-	static RACScheduler *mainQueueScheduler = nil;
+	static RACScheduler *mainThreadScheduler;
 	dispatch_once(&onceToken, ^{
-		mainQueueScheduler = [RACScheduler schedulerWithScheduleBlock:^(void (^block)(void)) {
-			if(dispatch_get_current_queue() == dispatch_get_main_queue()) {
-				block();
-			} else {
-				dispatch_async(dispatch_get_main_queue(), block);
-			}
-		}];
+		mainThreadScheduler = [[RACQueueScheduler alloc] initWithName:@"com.ReactiveCocoa.RACScheduler.mainThreadScheduler" targetQueue:dispatch_get_main_queue()];
 	});
 	
-	return mainQueueScheduler;
+	return mainThreadScheduler;
 }
 
-+ (instancetype)backgroundScheduler {
++ (instancetype)schedulerWithPriority:(RACSchedulerPriority)priority {
+	return [[RACQueueScheduler alloc] initWithName:@"com.ReactiveCocoa.RACScheduler.backgroundScheduler" targetQueue:dispatch_get_global_queue(priority, 0)];
+}
+
++ (instancetype)scheduler {
+	return [self schedulerWithPriority:RACSchedulerPriorityDefault];
+}
+
++ (instancetype)subscriptionScheduler {
 	static dispatch_once_t onceToken;
-	static RACScheduler *backgroundScheduler = nil;
+	static RACScheduler *subscriptionScheduler;
 	dispatch_once(&onceToken, ^{
-		backgroundScheduler = [RACScheduler schedulerWithScheduleBlock:^(void (^block)(void)) {
-			dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), block);
-		}];
+		subscriptionScheduler = [[RACSubscriptionScheduler alloc] init];
 	});
-	
-	return backgroundScheduler;
+
+	return subscriptionScheduler;
 }
 
-+ (instancetype)deferredScheduler {
-	static dispatch_once_t onceToken;
-	static RACScheduler *deferredScheduler = nil;
-	dispatch_once(&onceToken, ^{
-		deferredScheduler = [RACScheduler schedulerWithScheduleBlock:^(void (^block)(void)) {
-			dispatch_async(dispatch_get_current_queue(), block);
-		}];
-	});
-	
-	return deferredScheduler;
++ (BOOL)isOnMainThread {
+	return [NSOperationQueue.currentQueue isEqual:NSOperationQueue.mainQueue] || [NSThread isMainThread];
 }
 
-+ (instancetype)operationQueueScheduler {
-	NSOperationQueue *queue = [[NSOperationQueue alloc] init];
-	[queue setMaxConcurrentOperationCount:NSOperationQueueDefaultMaxConcurrentOperationCount];
-	[queue setName:@"RACOperationQueueSchedulerQueue"];
-	return [self schedulerWithOperationQueue:queue];
++ (instancetype)currentScheduler {
+	RACScheduler *scheduler = (__bridge id)dispatch_get_specific(RACSchedulerCurrentSchedulerKey);
+	if (scheduler != nil) return scheduler;
+	if ([self.class isOnMainThread]) return RACScheduler.mainThreadScheduler;
+
+	return nil;
 }
 
-+ (instancetype)sharedOperationQueueScheduler {
-	static dispatch_once_t onceToken;
-	static RACScheduler *sharedOperationQueueScheduler = nil;
-	dispatch_once(&onceToken, ^{
-		NSOperationQueue *queue = [[NSOperationQueue alloc] init];
-		[queue setMaxConcurrentOperationCount:NSOperationQueueDefaultMaxConcurrentOperationCount];
-		[queue setName:@"RACSharedOperationQueueSchedulerQueue"];
-		sharedOperationQueueScheduler = [self schedulerWithOperationQueue:queue];
-	});
-	
-	return sharedOperationQueueScheduler;
+#pragma mark Scheduling
+
+- (RACDisposable *)schedule:(void (^)(void))block {
+	NSAssert(NO, @"-schedule: must be implemented by a subclass.");
+	return nil;
 }
 
-+ (instancetype)schedulerWithOperationQueue:(NSOperationQueue *)queue {
-	return [RACScheduler schedulerWithScheduleBlock:^(void (^block)(void)) {
-		[queue addOperationWithBlock:block];
+- (RACDisposable *)scheduleRecursiveBlock:(RACSchedulerRecursiveBlock)recursiveBlock {
+	RACCompoundDisposable *disposable = [RACCompoundDisposable compoundDisposable];
+
+	__block volatile uint32_t disposed = 0;
+	BOOL (^isDisposed)(void) = [^{
+		return disposed != 0;
+	} copy];
+
+	[disposable addDisposable:[RACDisposable disposableWithBlock:^{
+		OSAtomicOr32Barrier(1, &disposed);
+	}]];
+
+	[self scheduleRecursiveBlock:[recursiveBlock copy] addingToDisposable:disposable isDisposedBlock:isDisposed];
+	return disposable;
+}
+
+- (void)scheduleRecursiveBlock:(RACSchedulerRecursiveBlock)recursiveBlock addingToDisposable:(RACCompoundDisposable *)disposable isDisposedBlock:(BOOL (^)(void))isDisposed {
+	RACDisposable *schedulingDisposable = [self schedule:^{
+		if (isDisposed()) return;
+
+		__block NSUInteger rescheduleCount = 0;
+		recursiveBlock(^{
+			++rescheduleCount;
+		});
+
+		for (NSUInteger i = 0; i < rescheduleCount; i++) {
+			if (isDisposed()) return;
+
+			[self scheduleRecursiveBlock:recursiveBlock addingToDisposable:disposable isDisposedBlock:isDisposed];
+		}
 	}];
-}
 
-- (void)schedule:(void (^)(void))block {
-	NSParameterAssert(block != NULL);
-	
-	if(self.scheduleBlock != NULL) {
-		self.scheduleBlock(block);
-	}
+	if (schedulingDisposable != nil) [disposable addDisposable:schedulingDisposable];
 }
 
 @end

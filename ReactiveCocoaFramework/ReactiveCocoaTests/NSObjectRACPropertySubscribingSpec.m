@@ -6,11 +6,10 @@
 //  Copyright (c) 2012 GitHub, Inc. All rights reserved.
 //
 
-#import "RACSpecs.h"
 #import "NSObject+RACPropertySubscribing.h"
 #import "RACDisposable.h"
 #import "RACTestObject.h"
-#import "RACSubscribable.h"
+#import "RACSignal.h"
 
 SpecBegin(NSObjectRACPropertySubscribing)
 
@@ -30,13 +29,13 @@ describe(@"-rac_addDeallocDisposable:", ^{
 	});
 });
 
-describe(@"+rac_subscribableFor:keyPath:onObject:", ^{
+describe(@"+rac_signalFor:keyPath:onObject:", ^{
 	it(@"shouldn't crash when the value is changed on a different queue", ^{
 		__block id value;
 		@autoreleasepool {
 			RACTestObject *object __attribute__((objc_precise_lifetime)) = [[RACTestObject alloc] init];
-			RACSubscribable *subscribable = [NSObject rac_subscribableFor:object keyPath:@"objectValue" onObject:self];
-			[subscribable subscribeNext:^(id x) {
+			id<RACSignal> signal = [NSObject rac_signalFor:object keyPath:@"objectValue" onObject:self];
+			[signal subscribeNext:^(id x) {
 				value = x;
 			}];
 

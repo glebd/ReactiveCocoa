@@ -6,19 +6,18 @@
 //  Copyright (c) 2012 GitHub, Inc. All rights reserved.
 //
 
-#import "RACSpecs.h"
 #import "RACSubscriptingAssignmentTrampoline.h"
-#import "RACPropertySubscribableExamples.h"
+#import "RACPropertySignalExamples.h"
 #import "RACTestObject.h"
 #import "RACSubject.h"
 
 SpecBegin(RACSubscriptingAssignmentTrampoline)
 
-void (^setupBlock)(RACTestObject *, NSString *, RACSubject *) = ^(RACTestObject *testObject, NSString *keyPath, RACSubject *subject) {
-	[RACSubscriptingAssignmentTrampoline trampoline][ [[RACSubscriptingAssignmentObjectKeyPathPair alloc] initWithObject:testObject keyPath:keyPath] ] = subject;
+id setupBlock = ^(RACTestObject *testObject, NSString *keyPath, id<RACSignal> signal) {
+	[RACSubscriptingAssignmentTrampoline trampoline][ [[RACSubscriptingAssignmentObjectKeyPathPair alloc] initWithObject:testObject keyPath:keyPath] ] = signal;
 };
 
-itShouldBehaveLike(RACPropertySubscribableExamples, @{ RACPropertySubscribableExamplesSetupBlock: setupBlock });
+itShouldBehaveLike(RACPropertySignalExamples, @{ RACPropertySignalExamplesSetupBlock: setupBlock }, nil);
 
 it(@"should expand the RAC macro properly", ^{
 	RACSubject *subject = [RACSubject subject];

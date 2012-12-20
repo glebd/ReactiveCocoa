@@ -39,39 +39,39 @@
     return self;
 }
 
-- (RACSubscribable *)login {
+- (id<RACSignal>)login {
 	return [self enqueueRequestWithMethod:@"GET" path:@"" parameters:nil];
 }
 
-- (RACSubscribable *)fetchUserInfo {
+- (id<RACSignal>)fetchUserInfo {
 	return [self enqueueRequestWithMethod:@"GET" path:@"user" parameters:nil];
 }
 
-- (RACSubscribable *)fetchUserRepos {
+- (id<RACSignal>)fetchUserRepos {
 	return [self enqueueRequestWithMethod:@"GET" path:@"user/repos" parameters:nil];
 }
 
-- (RACSubscribable *)fetchUserOrgs {
+- (id<RACSignal>)fetchUserOrgs {
 	return [self enqueueRequestWithMethod:@"GET" path:@"user/orgs" parameters:nil];
 }
 
-- (RACSubscribable *)fetchOrgInfo:(GHGitHubOrg *)org {
+- (id<RACSignal>)fetchOrgInfo:(GHGitHubOrg *)org {
 	return [self enqueueRequestWithMethod:@"GET" path:[NSString stringWithFormat:@"orgs/%@", org.username] parameters:nil];
 }
 
-- (RACSubscribable *)fetchReposForOrg:(GHGitHubOrg *)org {
+- (id<RACSignal>)fetchReposForOrg:(GHGitHubOrg *)org {
 	return [self enqueueRequestWithMethod:@"GET" path:[NSString stringWithFormat:@"orgs/%@/repos", org.username] parameters:nil];
 }
 
-- (RACSubscribable *)fetchPublicKeys {
+- (id<RACSignal>)fetchPublicKeys {
 	return [self enqueueRequestWithMethod:@"GET" path:@"user/keys" parameters:nil];
 }
 
-- (RACSubscribable *)createRepoWithName:(NSString *)name description:(NSString *)description private:(BOOL)isPrivate {
+- (id<RACSignal>)createRepoWithName:(NSString *)name description:(NSString *)description private:(BOOL)isPrivate {
 	return [self createRepoWithName:name org:nil team:nil description:description private:isPrivate];
 }
 
-- (RACSubscribable *)createRepoWithName:(NSString *)name org:(GHGitHubOrg *)org team:(GHGitHubTeam *)team description:(NSString *)description private:(BOOL)isPrivate {
+- (id<RACSignal>)createRepoWithName:(NSString *)name org:(GHGitHubOrg *)org team:(GHGitHubTeam *)team description:(NSString *)description private:(BOOL)isPrivate {
 	NSMutableDictionary *options = [NSMutableDictionary dictionary];
 	[options setObject:name forKey:@"name"];
 	[options setObject:description forKey:@"description"];
@@ -82,15 +82,15 @@
 	return [self enqueueRequestWithMethod:@"POST" path:path parameters:options];
 }
 
-- (RACSubscribable *)postPublicKey:(NSString *)key title:(NSString *)title {
+- (id<RACSignal>)postPublicKey:(NSString *)key title:(NSString *)title {
 	NSMutableDictionary *options = [NSMutableDictionary dictionary];
 	[options setObject:key forKey:@"key"];
 	[options setObject:title forKey:@"title"];
 	return [self enqueueRequestWithMethod:@"POST" path:@"user/keys" parameters:options];
 }
 
-- (RACSubscribable *)enqueueRequestWithMethod:(NSString *)method path:(NSString *)path parameters:(NSDictionary *)parameters {
-	RACAsyncSubject *subject = [RACAsyncSubject subject];
+- (id<RACSignal>)enqueueRequestWithMethod:(NSString *)method path:(NSString *)path parameters:(NSDictionary *)parameters {
+	RACReplaySubject *subject = [RACReplaySubject subject];
 	NSURLRequest *request = [self requestWithMethod:method path:path parameters:parameters];
 	AFHTTPRequestOperation *operation = [self HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation *operation, id responseObject) {
 		[subject sendNext:responseObject];

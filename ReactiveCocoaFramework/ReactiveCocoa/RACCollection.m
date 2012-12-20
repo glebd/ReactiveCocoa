@@ -8,13 +8,13 @@
 
 #import "RACCollection.h"
 #import "RACSubject.h"
-#import "RACSubscribable.h"
+#import "RACSignal.h"
 #import "RACUnit.h"
 #import "NSObject+RACPropertySubscribing.h"
 
 @interface RACCollection () {
 	// We explicitly declare these because otherwise the implicit declaration
-	// would make them RACSubscribables instead of RACSubjects.
+	// would make them RACSignals instead of RACSubjects.
 	RACSubject *objectsAdded;
 	RACSubject *objectsRemoved;
 }
@@ -36,9 +36,9 @@
 	self.backingArray = [NSMutableArray array];
 	objectsAdded = [RACSubject subject];
 	objectsRemoved = [RACSubject subject];
-	countChanged = [[RACSubscribable
+	countChanged = [[RACSignal
 		merge:[NSArray arrayWithObjects:self.objectsAdded, self.objectsRemoved, nil]]
-		select:^(id _) {
+		map:^(id _) {
 			return [RACUnit defaultUnit];
 		}];
 	

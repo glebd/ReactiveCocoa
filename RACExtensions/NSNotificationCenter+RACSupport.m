@@ -10,14 +10,14 @@
 
 @implementation NSNotificationCenter (RACSupport)
 
-- (RACSubscribable *)rac_addObserverForName:(NSString *)notificationName object:(id)object {
-	return [RACSubscribable createSubscribable:^(id<RACSubscriber> subscriber) {
-		__block id observer = [self addObserverForName:notificationName object:object queue:nil usingBlock:^(NSNotification *note) {
+- (RACSignal *)rac_addObserverForName:(NSString *)notificationName object:(id)object {
+	return [RACSignal createSignal:^(id<RACSubscriber> subscriber) {
+		id observer = [self addObserverForName:notificationName object:object queue:nil usingBlock:^(NSNotification *note) {
 			[subscriber sendNext:note];
 		}];
 		
 		return [RACDisposable disposableWithBlock:^{
-			[[NSNotificationCenter defaultCenter] removeObserver:observer];
+			[NSNotificationCenter.defaultCenter removeObserver:observer];
 		}];
 	}];
 }

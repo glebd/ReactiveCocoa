@@ -10,10 +10,10 @@
 
 @implementation NSString (RACSupport)
 
-+ (RACSubscribable *)rac_readContentsOfURL:(NSURL *)URL usedEncoding:(NSStringEncoding *)encoding scheduler:(RACScheduler *)scheduler {
++ (RACSignal *)rac_readContentsOfURL:(NSURL *)URL usedEncoding:(NSStringEncoding *)encoding scheduler:(RACScheduler *)scheduler {
 	NSParameterAssert(scheduler != nil);
 	
-	RACAsyncSubject *subject = [RACAsyncSubject subject];
+	RACReplaySubject *subject = [RACReplaySubject subject];
 	
 	[scheduler schedule:^{
 		NSError *error = nil;

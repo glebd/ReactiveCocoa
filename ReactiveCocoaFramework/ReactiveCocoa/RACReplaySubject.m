@@ -7,97 +7,112 @@
 //
 
 #import "RACReplaySubject.h"
+#import "RACDisposable.h"
+#import "RACScheduler+Private.h"
 #import "RACSubscriber.h"
 #import "RACTuple.h"
-#import "RACDisposable.h"
+#import "RACCompoundDisposable.h"
+#import <libkern/OSAtomic.h>
 
 const NSUInteger RACReplaySubjectUnlimitedCapacity = 0;
 
 @interface RACReplaySubject ()
-@property (nonatomic, strong) NSMutableArray *valuesReceived;
-@property (nonatomic, assign) NSUInteger capacity;
-@property (assign) BOOL hasCompletedAlready;
-@property (strong) NSError *error;
+
+@property (nonatomic, assign, readonly) NSUInteger capacity;
+
+// These properties should only be modified while synchronized on self.
+@property (nonatomic, strong, readonly) NSMutableArray *valuesReceived;
+@property (nonatomic, assign) BOOL hasCompleted;
+@property (nonatomic, assign) BOOL hasError;
+@property (nonatomic, strong) NSError *error;
+
 @end
 
 
 @implementation RACReplaySubject
 
+#pragma mark Lifecycle
+
++ (instancetype)replaySubjectWithCapacity:(NSUInteger)capacity {
+	return [[self alloc] initWithCapacity:capacity];
+}
+
 - (instancetype)init {
+	return [self initWithCapacity:RACReplaySubjectUnlimitedCapacity];
+}
+
+- (instancetype)initWithCapacity:(NSUInteger)capacity {
 	self = [super init];
-	if(self == nil) return nil;
+	if (self == nil) return nil;
 	
-	self.valuesReceived = [NSMutableArray array];
+	_capacity = capacity;
+	_valuesReceived = [NSMutableArray arrayWithCapacity:capacity];
 	
 	return self;
 }
 
-
-#pragma mark RACSubscribable
+#pragma mark RACSignal
 
 - (RACDisposable *)subscribe:(id<RACSubscriber>)subscriber {
-	RACDisposable *disposable = [super subscribe:subscriber];
-	NSArray *valuesCopy = nil;
-	@synchronized(self.valuesReceived) {
-		valuesCopy = [self.valuesReceived copy];
-	}
-	
-	for(id value in valuesCopy) {
-		[subscriber sendNext:[value isKindOfClass:[RACTupleNil class]] ? nil : value];
-	}
-	
-	if(self.hasCompletedAlready) {
-		[subscriber sendCompleted];
-		[disposable dispose];
-	} else if(self.error != nil) {
-		[subscriber sendError:self.error];
-		[disposable dispose];
-	}
-	
-	return disposable;
-}
+	__block volatile uint32_t disposed = 0;
 
+	RACDisposable *stopDisposable = [RACDisposable disposableWithBlock:^{
+		OSAtomicOr32Barrier(1, &disposed);
+	}];
+	
+	RACCompoundDisposable *compoundDisposable = [RACCompoundDisposable compoundDisposableWithDisposables:@[ stopDisposable ]];
+	RACDisposable *schedulingDisposable = [RACScheduler.subscriptionScheduler schedule:^{
+		@synchronized (self) {
+			for (id value in self.valuesReceived) {
+				if (disposed != 0) return;
+
+				[subscriber sendNext:([value isKindOfClass:RACTupleNil.class] ? nil : value)];
+			}
+
+			if (disposed != 0) return;
+
+			if (self.hasCompleted) {
+				[subscriber sendCompleted];
+			} else if (self.hasError) {
+				[subscriber sendError:self.error];
+			} else {
+				RACDisposable *subscriptionDisposable = [super subscribe:subscriber];
+				[compoundDisposable addDisposable:subscriptionDisposable];
+			}
+		}
+	}];
+
+	if (schedulingDisposable != nil) [compoundDisposable addDisposable:schedulingDisposable];
+
+	return compoundDisposable;
+}
 
 #pragma mark RACSubscriber
 
 - (void)sendNext:(id)value {
-	[super sendNext:value];
-	
-	@synchronized(self.valuesReceived) {
-		[self.valuesReceived addObject:value ? : [RACTupleNil tupleNil]];
+	@synchronized (self) {
+		[self.valuesReceived addObject:value ?: RACTupleNil.tupleNil];
+		[super sendNext:value];
 		
-		if(self.capacity != RACReplaySubjectUnlimitedCapacity) {
-			while(self.valuesReceived.count > self.capacity) {
-				[self.valuesReceived removeObjectAtIndex:0];
-			}
+		if (self.capacity != RACReplaySubjectUnlimitedCapacity && self.valuesReceived.count > self.capacity) {
+			[self.valuesReceived removeObjectsInRange:NSMakeRange(0, self.valuesReceived.count - self.capacity)];
 		}
 	}
 }
 
 - (void)sendCompleted {
-	self.hasCompletedAlready = YES;
-	
-	[super sendCompleted];
+	@synchronized (self) {
+		self.hasCompleted = YES;
+		[super sendCompleted];
+	}
 }
 
 - (void)sendError:(NSError *)e {
-	self.error = e;
-	
-	[super sendError:e];
-}
-
-
-#pragma mark API
-
-@synthesize valuesReceived;
-@synthesize capacity;
-@synthesize hasCompletedAlready;
-@synthesize error;
-
-+ (instancetype)replaySubjectWithCapacity:(NSUInteger)capacity {
-	RACReplaySubject *subject = [self subject];
-	subject.capacity = capacity;
-	return subject;
+	@synchronized (self) {
+		self.hasError = YES;
+		self.error = e;
+		[super sendError:e];
+	}
 }
 
 @end
