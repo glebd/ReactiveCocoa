@@ -7,10 +7,9 @@
 //
 
 #import "GHDUserViewController.h"
-#import "EXTScope.h"
 #import "GHDUserView.h"
-#import "GHGitHubClient.h"
 #import "GHGitHubUser.h"
+#import "GHGitHubClient.h"
 #import "NSView+GHDExtensions.h"
 
 @interface GHDUserViewController ()
@@ -32,11 +31,11 @@
 	
 	[self.view.spinner startAnimation:nil];
 	
-	[self.view.usernameTextField rac_bind:NSValueBinding toObject:self withKeyPath:@keypath(self.userAccount.username)];
-	[self.view.realNameTextField rac_bind:NSValueBinding toObject:self withKeyPath:@keypath(self.userAccount.realName)];
-	[self.view.spinner rac_bind:NSHiddenBinding toObject:self withNegatedKeyPath:@keypath(self.loading)];
-	[self.view.valuesContainerView rac_bind:NSHiddenBinding toObject:self withKeyPath:@keypath(self.loading)];
-	[self.view.avatarImageView rac_bind:NSValueBinding toObject:self withKeyPath:@keypath(self.avatar)];
+	[self.view.usernameTextField bind:NSValueBinding toObject:self withKeyPath:@keypath(self.userAccount.username)];
+	[self.view.realNameTextField bind:NSValueBinding toObject:self withKeyPath:@keypath(self.userAccount.realName)];
+	[self.view.spinner bind:NSHiddenBinding toObject:self withNegatedKeyPath:@keypath(self.loading)];
+	[self.view.valuesContainerView bind:NSHiddenBinding toObject:self withKeyPath:@keypath(self.loading)];
+	[self.view.avatarImageView bind:NSValueBinding toObject:self withKeyPath:@keypath(self.avatar)];
 }
 
 
@@ -58,17 +57,16 @@
 	self.client = [GHGitHubClient clientForUser:self.userAccount];
 	self.loading = YES;
 	
-	@unsafeify(self);
-
+	__block __unsafe_unretained id weakSelf = self;
 	// We're using -merge: so that -fetchUser, -fetchRepos, and -fetchOrgs are 
 	// all executed independently. We're then told when they've all completed.
 	// -finally: lets us share logic regardless of whether we get an error or 
 	// complete successfully.
-	[[[RACSignal 
+	[[[RACSubscribable 
 		merge:[NSArray arrayWithObjects:[self fetchUser], [self fetchRepos], [self fetchOrgs], nil]] 
 		finally:^{
-			@strongify(self);
-			self.loading = NO;
+			GHDUserViewController *strongSelf = weakSelf;
+			strongSelf.loading = NO;
 		}]
 		subscribeNext:^(id x) {
 			// nothing
@@ -81,76 +79,77 @@
 	// We're using -deliverOn: to load the image in a background queue and then 
 	// finish with another -deliverOn: so that subscribers get the result on the 
 	// main queue.
-	id<RACSignal> loadedAvatar = [[[[RACAble(self.userAccount.avatarURL) 
-		filter:^ BOOL (id x) {
+	RACSubscribable *loadedAvatar = [[[[[RACAble(self.userAccount.avatarURL) 
+		where:^BOOL(id x) {
 			return x != nil;
 		}] 
-		deliverOn:[RACScheduler scheduler]]
-		flattenMap:^(NSURL *URL) {
-			@strongify(self);
-
-			return [self loadImageAtURL:URL];
+		deliverOn:[RACScheduler sharedOperationQueueScheduler]] 
+		injectObjectWeakly:self]
+		selectMany:^(RACTuple *t) {
+			GHDUserViewController *self = t.last;
+			return [self loadImageAtURL:t.first];
 		}] 
-		deliverOn:RACScheduler.mainThreadScheduler];
+		deliverOn:[RACScheduler mainQueueScheduler]];
 	
-	// -merge: takes the latest value from the Signals. In this case, 
-	// we're using -[RACSignal return:] to make a Signal that 
+	// -merge: takes the latest value from the subscribables. In this case, 
+	// we're using -[RACSubscribable return:] to make a subscribable that 
 	// immediately sends the default image, and will use the loaded avatar when
 	// it loads.
-	[[RACSignal 
-		merge:[NSArray arrayWithObjects:[RACSignal return:[NSImage imageNamed:NSImageNameUser]], loadedAvatar, nil]] 
+	[[RACSubscribable 
+		merge:[NSArray arrayWithObjects:[RACSubscribable return:[NSImage imageNamed:NSImageNameUser]], loadedAvatar, nil]] 
 		toProperty:@keypath(self.avatar) onObject:self];
 	
 	return self;
 }
 
-- (id<RACSignal>)fetchUser {	
-	@unsafeify(self);
-	return [[self.client 
+- (RACSubscribable *)fetchUser {	
+	return [[[self.client 
 				fetchUserInfo] 
-				map:^(NSDictionary *userDict) {
-					@strongify(self);
-
-					[self.userAccount setValuesForKeysWithDictionary:userDict];
+				injectObjectWeakly:self]
+				select:^(RACTuple *t) {
+					GHDUserViewController *self = t.last;
+					[self.userAccount setValuesForKeysWithDictionary:t.first];
 					return [RACUnit defaultUnit];
 				}];
 }
 
-- (id<RACSignal>)fetchRepos {	
-	return [[self.client 
+- (RACSubscribable *)fetchRepos {	
+	return [[[self.client 
 				fetchUserRepos] 
-				map:^(NSArray *repos) {
-					NSLog(@"repos: %@", repos);
+				injectObjectWeakly:self] 
+				select:^(RACTuple *t) {
+					NSLog(@"repos: %@", t.first);
 					return [RACUnit defaultUnit];
 				}];
 }
 
-- (id<RACSignal>)fetchOrgs {	
-	return [[self.client 
-				fetchUserOrgs] 
-				map:^(NSArray *orgs) {
-					NSLog(@"orgs: %@", orgs);
+- (RACSubscribable *)fetchOrgs {	
+	return [[[self.client 
+				fetchUserRepos] 
+				injectObjectWeakly:self]
+				select:^(RACTuple *t) {
+					NSLog(@"orgs: %@", t.first);
 					return [RACUnit defaultUnit];
 				}];
 }
 
-- (id<RACSignal>)loadImageAtURL:(NSURL *)URL {
+- (RACSubscribable *)loadImageAtURL:(NSURL *)URL {
 	// This -defer, -publish, -autoconnect dance might seem a little odd, so 
 	// let's talk through it.
 	//
 	// We're using -defer because -startWithScheduler:block: returns us a hot 
-	// Signal but we really want a cold one. Why do we want a cold one? 
+	// subscribable but we really want a cold one. Why do we want a cold one? 
 	// It lets us defer the actual work of loading the image until someone 
 	// actually cares enough about it to subscribe. But even more than that, 
-	// cold Signals let us use operations like -retry: or -repeat:.
+	// cold subscribables let us use operations like -retry: or -repeat:.
 	//
-	// But the downside to cold Signals is that subsequent subscribers
-	// will cause the Signal to fire again, which we don't really want.
-	// So we use -publish to share the subscriptions to the underlying Signal.
-	// -autoconnect means the connectable Signal from -publish will connect
+	// But the downside to cold subscribables is that subsequent subscribers
+	// will cause the subscribable to fire again, which we don't really want.
+	// So we use -publish to share the subscriptions to the underlying subscribable.
+	// -autoconnect means the connectable subscribable from -publish will connect
 	// automatically when it receives its first subscriber.
-	id<RACSignal> loadImage = [RACSignal defer:^{
-		return [RACSignal startWithScheduler:[RACScheduler immediateScheduler] block:^id(BOOL *success, NSError **error) {
+	RACSubscribable *loadImage = [RACSubscribable defer:^{
+		return [RACSubscribable startWithScheduler:[RACScheduler immediateScheduler] block:^id(BOOL *success, NSError **error) {
 			NSImage *image = [[NSImage alloc] initWithContentsOfURL:URL];
 			if(image == nil) {
 				*success = NO;
@@ -163,7 +162,7 @@
 	
 	return [[[[loadImage 
 				retry:1] 
-				catchTo:[RACSignal return:[NSImage imageNamed:NSImageNameUser]]] 
+				catchTo:[RACSubscribable return:[NSImage imageNamed:NSImageNameUser]]] 
 				publish] 
 				autoconnect];
 }

@@ -8,7 +8,6 @@
 
 #import "GHDLoginViewController.h"
 #import "EXTKeyPathCoding.h"
-#import "EXTScope.h"
 #import "GHDLoginView.h"
 #import "GHGitHubClient.h"
 #import "GHGitHubUser.h"
@@ -43,77 +42,80 @@
 	}];
 	
 	// Login is only enabled when they've entered both a username and password.
-	self.loginCommand = [RACAsyncCommand commandWithCanExecuteSignal:[RACSignal
+	self.loginCommand = [RACAsyncCommand commandWithCanExecuteSubscribable:[RACSubscribable
 		combineLatest:@[ RACAbleWithStart(self.username), RACAbleWithStart(self.password) ]
-		reduce:^(NSString *username, NSString *password) {
-			return @(username.length > 0 && password.length > 0);
+		reduce:^(RACTuple *xs) {
+			return @([[xs objectAtIndex:0] length] > 0 && [[xs objectAtIndex:1] length] > 0);
 		}]
 		block:NULL];
 	
-	@unsafeify(self);
-
-	[self.loginCommand subscribeNext:^(id _) {
-		@strongify(self);
-
-		self.user = [GHGitHubUser userWithUsername:self.username password:self.password];
-		self.client = [GHGitHubClient clientForUser:self.user];
-		self.loggingIn = YES;
-	}];
+	[[self.loginCommand 
+		injectObjectWeakly:self] 
+		subscribeNext:^(RACTuple *t) {
+			GHDLoginViewController *self = t.last;
+			self.user = [GHGitHubUser userWithUsername:self.username password:self.password];
+			self.client = [GHGitHubClient clientForUser:self.user];
+			self.loggingIn = YES;
+		}];
 	
+	__block __unsafe_unretained id weakSelf = self;
 	// Note the -repeat and -asMaybes at the end. -repeat means that this
-	// Signal will resubscribe to its source right after it completes.
-	// This lets us subscribe to the same Signal even though the source
-	// Signal (the API call) completes. -asMaybes means that we wrap 
+	// subscribable will resubscribe to its source right after it completes.
+	// This lets us subscribe to the same subscribable even though the source
+	// subscribable (the API call) completes. -asMaybes means that we wrap 
 	// each next value or error in a RACMaybe. This means that even if the 
-	// API hits an error, the Signal will still be valid.
-	id<RACSignal> loginResult = [[[self.loginCommand 
+	// API hits an error, the subscribable will still be valid.
+	RACSubscribable *loginResult = [[[self.loginCommand 
 		addAsyncBlock:^(id _) {
-			@strongify(self);
-			return [self.client login];
+			GHDLoginViewController *strongSelf = weakSelf;
+			return [strongSelf.client login];
 		}]
 		asMaybes] 
 		repeat];
 
 	// Since we used -asMaybes above, we'll need to filter out the specific
 	// error or success cases.
-	[[[loginResult 
-		filter:^(id x) {
+	[[[[loginResult 
+		where:^(id x) {
 			return [x hasError];
 		}] 
-		map:^(id x) {
+		select:^(id x) {
 			return [x error];
 		}] 
-		subscribeNext:^(NSError *error) {
-			@strongify(self);
-
+		injectObjectWeakly:self]
+		subscribeNext:^(RACTuple *t) {
+			GHDLoginViewController *self = t.last;
 			self.loginFailedHidden = NO;
-			NSLog(@"error logging in: %@", error);
+			NSLog(@"error logging in: %@", t.first);
 		}];
 	
-	[[loginResult 
-		filter:^(id x) {
+	[[[loginResult 
+		where:^(id x) {
 			return [x hasObject];
 		}]
-		subscribeNext:^(id _) {
-			@strongify(self);
-
+		injectObjectWeakly:self]
+		subscribeNext:^(RACTuple *t) {
+			GHDLoginViewController *self = t.last;
 			self.successHidden = NO;
 			[self.didLoginSubject sendNext:self.user];
 		}];
 	
 	[[loginResult 
-		map:^ id (id x) {
+		select:^id(id x) {
 			return [NSNumber numberWithBool:NO];
 		}] 
 		toProperty:@keypath(self.loggingIn) onObject:self];
 	
 	// When either username or password change, hide the success or failure
 	// message.
-	[[RACSignal
-		combineLatest:@[ RACAble(self.username), RACAble(self.password)]]
-		subscribeNext:^(id _) {
-			@strongify(self);
-
+	[[[self 
+		rac_whenAny:[NSArray arrayWithObjects:@keypath(self.username), @keypath(self.password), nil] 
+		reduce:^id(RACTuple *xs) {
+			return xs;
+		}] 
+		injectObjectWeakly:self] 
+		subscribeNext:^(RACTuple *t) {
+			GHDLoginViewController *self = t.last;
 			self.successHidden = self.loginFailedHidden = YES;
 		}];
 	
@@ -126,11 +128,11 @@
 - (void)loadView {
 	self.view = [GHDLoginView ghd_viewFromNib];
 	
-	[self.view.usernameTextField rac_bind:NSValueBinding toObject:self withKeyPath:@keypath(self.username)];
-	[self.view.passwordTextField rac_bind:NSValueBinding toObject:self withKeyPath:@keypath(self.password)];
-	[self.view.successTextField rac_bind:NSHiddenBinding toObject:self withKeyPath:@keypath(self.successHidden)];
-	[self.view.couldNotLoginTextField rac_bind:NSHiddenBinding toObject:self withKeyPath:@keypath(self.loginFailedHidden)];
-	[self.view.loggingInSpinner rac_bind:NSHiddenBinding toObject:self withNegatedKeyPath:@keypath(self.loggingIn)];
+	[self.view.usernameTextField bind:NSValueBinding toObject:self withKeyPath:@keypath(self.username)];
+	[self.view.passwordTextField bind:NSValueBinding toObject:self withKeyPath:@keypath(self.password)];
+	[self.view.successTextField bind:NSHiddenBinding toObject:self withKeyPath:@keypath(self.successHidden)];
+	[self.view.couldNotLoginTextField bind:NSHiddenBinding toObject:self withKeyPath:@keypath(self.loginFailedHidden)];
+	[self.view.loggingInSpinner bind:NSHiddenBinding toObject:self withNegatedKeyPath:@keypath(self.loggingIn)];
 	
 	[self.view.loggingInSpinner startAnimation:nil];
 	
@@ -140,6 +142,15 @@
 
 #pragma mark API
 
+@synthesize username;
+@synthesize password;
 @dynamic view;
+@synthesize successHidden;
+@synthesize loginFailedHidden;
+@synthesize loginCommand;
+@synthesize loggingIn;
+@synthesize user;
+@synthesize client;
+@synthesize didLoginSubject;
 
 @end

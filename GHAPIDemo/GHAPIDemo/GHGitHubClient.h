@@ -20,21 +20,21 @@
 + (GHGitHubClient *)clientForUser:(GHGitHubUser *)user;
 
 // User
-- (id<RACSignal>)login;
-- (id<RACSignal>)fetchUserInfo;
+- (RACSubscribable *)login;
+- (RACSubscribable *)fetchUserInfo;
 
-- (id<RACSignal>)fetchUserRepos;
-- (id<RACSignal>)createRepoWithName:(NSString *)name description:(NSString *)description private:(BOOL)isPrivate;
+- (RACSubscribable *)fetchUserRepos;
+- (RACSubscribable *)createRepoWithName:(NSString *)name description:(NSString *)description private:(BOOL)isPrivate;
 
 // Orgs
-- (id<RACSignal>)fetchUserOrgs;
-- (id<RACSignal>)fetchOrgInfo:(GHGitHubOrg *)org;
+- (RACSubscribable *)fetchUserOrgs;
+- (RACSubscribable *)fetchOrgInfo:(GHGitHubOrg *)org;
 
-- (id<RACSignal>)fetchReposForOrg:(GHGitHubOrg *)org;
-- (id<RACSignal>)createRepoWithName:(NSString *)name org:(GHGitHubOrg *)org team:(GHGitHubTeam *)team description:(NSString *)description private:(BOOL)isPrivate;
+- (RACSubscribable *)fetchReposForOrg:(GHGitHubOrg *)org;
+- (RACSubscribable *)createRepoWithName:(NSString *)name org:(GHGitHubOrg *)org team:(GHGitHubTeam *)team description:(NSString *)description private:(BOOL)isPrivate;
 
 // Public Keys
-- (id<RACSignal>)fetchPublicKeys;
-- (id<RACSignal>)postPublicKey:(NSString *)key title:(NSString *)title;
+- (RACSubscribable *)fetchPublicKeys;
+- (RACSubscribable *)postPublicKey:(NSString *)key title:(NSString *)title;
 
 @end

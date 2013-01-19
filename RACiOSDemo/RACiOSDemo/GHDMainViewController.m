@@ -39,13 +39,13 @@
     }];
 	
 	[[RACAble(self.text) 
-		map:^(id x) {
+		select:^(id x) {
 			return [x uppercaseString]; 
 		}]
 		toProperty:@keypath(self.label) onObject:self];
     
     [[RACAble(self.text2)
-        map:^ id (id x) {
+        select:^id(id x) {
             return [x lowercaseString];
         }]
         toProperty:@keypath(self.label2) onObject:self];
@@ -65,8 +65,8 @@
 	
 	// Even though iOS doesn't give us bindings like AppKit, we can fake them 
 	// pretty easily using RAC.
-	[self rac_bind:@keypath(self.text) to:self.view.textField.rac_textSignal];
-	[self rac_bind:@keypath(self.text2) to:self.view.textView.rac_textSignal];
+	[self rac_bind:@keypath(self.text) to:self.view.textField.rac_textSubscribable];
+	[self rac_bind:@keypath(self.text2) to:self.view.textView.rac_textSubscribable];
 }
 
 - (void)viewDidUnload {

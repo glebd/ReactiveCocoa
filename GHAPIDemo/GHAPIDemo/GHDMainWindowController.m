@@ -36,10 +36,10 @@
 	self.currentViewController = loginViewController;
 	
 	[[[loginViewController.didLoginSubject 
-		filter:^ BOOL (id x) {
+		where:^BOOL(id x) {
 			return x != nil;
 		}] 
-		map:^(id x) {
+		select:^(id x) {
 			return [[GHDUserViewController alloc] initWithUserAccount:x];
 		}]
 		toProperty:@keypath(self.currentViewController) onObject:self];
